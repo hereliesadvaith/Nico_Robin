@@ -183,7 +183,7 @@ Certbot edits the server blocks to listen on 443 and installs a renewal timer.
 ```bash
 curl -I https://your-domain.com                     # 200, no TLS warning
 curl -I http://your-domain.com                      # 301 to https
-curl -s https://cms.your-domain.com/server/health   # {"status":"ok"}
+curl -s https://cms.your-domain.com/server/ping     # pong
 ss -ltn | grep -E '5678|8055'                       # 127.0.0.1 only
 ```
 

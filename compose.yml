@@ -75,6 +75,7 @@ services:
       - SECRET=${DIRECTUS_SECRET:?set DIRECTUS_SECRET in .env}
       - DB_CLIENT=pg
       - DB_HOST=directus-postgres
+      - DB_PORT=5432
       - DB_DATABASE=directus
       - DB_USER=directus
       - DB_PASSWORD=${DIRECTUS_DB_PASSWORD:?set DIRECTUS_DB_PASSWORD in .env}
