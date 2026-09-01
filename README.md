@@ -11,12 +11,19 @@ something it can do.
 
 | File | Purpose |
 | --- | --- |
-| `compose.yml` | n8n + Postgres. |
+| `compose.yml` | n8n and Directus, each with its own Postgres. |
 | `.env.example` | Template for the settings `compose.yml` requires. |
-| `files/` | Mounted at `/files` in the container, for workflows that read or write files. |
 
-n8n publishes port 5678 on `127.0.0.1` only, and Postgres publishes nothing.
-TLS is expected to terminate in a reverse proxy you run on the server.
+Directus is the backend: it holds the assistant's own data — memory, notes,
+whatever the workflows need to persist — and exposes it over REST and GraphQL
+for n8n to call at `http://directus:8055`.
+
+The two apps get a Postgres each rather than sharing one, so neither can reach
+the other's data and either can be moved or rebuilt on its own.
+
+n8n publishes 5678 and Directus 8055, both on `127.0.0.1` only; neither Postgres
+publishes anything. TLS is expected to terminate in a reverse proxy you run on
+the server.
 
 ---
 
@@ -24,10 +31,10 @@ TLS is expected to terminate in a reverse proxy you run on the server.
 
 ### 1. What you need
 
-- A Linux server (Ubuntu 22.04/24.04) with **2 GB RAM minimum**. Postgres plus
-  an AI Agent workflow will OOM-kill Node on 1 GB.
-- `your-domain.com` pointing at the server's public IP. Confirm before
-  requesting a certificate:
+- A Linux server (Ubuntu 22.04/24.04) with **4 GB RAM** for the full stack —
+  two Node apps and two Postgres instances.
+- `your-domain.com` and `cms.your-domain.com` pointing at the server's public
+  IP. Confirm before requesting a certificate:
 
   ```bash
   dig +short your-domain.com
@@ -48,8 +55,8 @@ sudo usermod -aG docker $USER   # log out and back in
 
 ### 3. Firewall
 
-Open SSH and the web ports only. **5678 stays closed** — nginx reaches n8n over
-loopback.
+Open SSH and the web ports only. **5678 and 8055 stay closed** — nginx reaches
+both apps over loopback.
 
 ```bash
 sudo ufw allow OpenSSH
@@ -65,17 +72,19 @@ git clone <this-repo> nico-robin && cd nico-robin
 cp .env.example .env
 ```
 
-Generate the two secrets and put them in `.env`:
+Generate the secrets and put them in `.env`:
 
 ```bash
 openssl rand -hex 32   # -> N8N_ENCRYPTION_KEY
-openssl rand -hex 24   # -> POSTGRES_PASSWORD
+openssl rand -hex 24   # -> N8N_DB_PASSWORD
+openssl rand -hex 16   # -> DIRECTUS_KEY
+openssl rand -hex 32   # -> DIRECTUS_SECRET
+openssl rand -hex 24   # -> DIRECTUS_DB_PASSWORD
 chmod 600 .env
 ```
 
-Set `N8N_DOMAIN` and `N8N_PUBLIC_URL` to your own domain — they appear in
-`.env.example` as `your-domain.com`. Compose refuses to start if either secret
-is missing, rather than booting with a broken config.
+Set the domains and the Directus admin email and password too. Compose refuses
+to start if anything is missing, rather than booting with a broken config.
 
 > **Back up `.env` off the server.** `N8N_ENCRYPTION_KEY` decrypts every stored
 > credential. A database backup restored without the matching key gives you
@@ -86,11 +95,13 @@ is missing, rather than booting with a broken config.
 
 ```bash
 docker compose up -d
-docker compose ps          # both services should reach (healthy)
-docker compose logs -f n8n
+docker compose ps
+docker compose logs -f n8n directus
 ```
 
-n8n is now on `127.0.0.1:5678`, not yet reachable from outside.
+n8n is on `127.0.0.1:5678` and Directus on `127.0.0.1:8055`, neither yet
+reachable from outside. Directus runs schema migrations on first boot, so it
+takes a minute longer than n8n to come up.
 
 ### 6. Reverse proxy
 
@@ -130,106 +141,138 @@ server {
 }
 ```
 
-Enable it and add TLS:
+And `/etc/nginx/sites-available/directus`:
+
+```nginx
+server {
+    listen 80;
+    server_name cms.your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8055;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Directus pushes realtime updates over a websocket.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # File uploads into the asset library.
+        client_max_body_size 100m;
+    }
+}
+```
+
+Enable them and add TLS:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/directus /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d your-domain.com
+sudo certbot --nginx -d your-domain.com -d cms.your-domain.com
 ```
 
-Certbot edits the server block to listen on 443 and installs a renewal timer.
+Certbot edits the server blocks to listen on 443 and installs a renewal timer.
 
 ### 7. Verify
 
 ```bash
-curl -I https://your-domain.com        # 200, no TLS warning
-curl -I http://your-domain.com         # 301 to https
-docker compose ps                          # both (healthy)
-ss -ltn | grep 5678                        # should show 127.0.0.1:5678 only
+curl -I https://your-domain.com                     # 200, no TLS warning
+curl -I http://your-domain.com                      # 301 to https
+curl -s https://cms.your-domain.com/server/health   # {"status":"ok"}
+ss -ltn | grep -E '5678|8055'                       # 127.0.0.1 only
 ```
 
-Then open <https://your-domain.com> and create the owner account. Do this
+Then open <https://your-domain.com> and create the n8n owner account. Do this
 immediately: until you do, the setup page is open to anyone who finds the
 domain, and a hostname is not a secret.
 
+Log into Directus at <https://cms.your-domain.com> with `DIRECTUS_ADMIN_EMAIL`
+and `DIRECTUS_ADMIN_PASSWORD`, change that password, then clear the pair from
+`.env`. For n8n's own calls, create a static access token in Directus rather
+than reusing the admin login.
+
 ### Without a reverse proxy
 
-If you skip nginx, n8n has to be exposed directly and there is no TLS: the login
-password and every credential you enter cross the network in the clear. Only
-reasonable for a short test. In `.env`:
+If you skip nginx there is no TLS: the login password and every credential you
+enter cross the network in the clear. Only reasonable for a short test.
 
-```ini
-N8N_BIND=0.0.0.0
-N8N_PROTOCOL=http
-N8N_PUBLIC_URL=http://your-domain.com:5678
-N8N_PROXY_HOPS=0
-N8N_SECURE_COOKIE=false
-```
-
-and open the port with `sudo ufw allow 5678/tcp`. Move to the proxy setup before
+Change the port publishing in `compose.yml` from `127.0.0.1:5678:5678` to
+`5678:5678`, set `N8N_PUBLIC_URL=http://your-domain.com:5678` in `.env`, and
+open the port with `sudo ufw allow 5678/tcp`. Move to the proxy setup before
 connecting any real account.
 
 ## Backups
 
 Two things are needed to restore, and both must be kept:
 
-1. **The Postgres database** — workflows, credentials, execution history.
-2. **`.env`** — without `N8N_ENCRYPTION_KEY` the restored credentials are
+1. **Both databases** — n8n's workflows, credentials and execution history, and
+   Directus's schema and content.
+2. **`.env`** — without `N8N_ENCRYPTION_KEY` the restored n8n credentials are
    undecryptable.
-
-The `n8n_data` volume also holds binary execution data, worth including if your
-workflows handle files.
+3. **`directus_uploads`** — files in the asset library live on disk, not in the
+   database.
 
 ```bash
-# database
-docker compose exec -T postgres pg_dump -U n8n n8n | gzip > n8n-db-$(date +%F).sql.gz
+docker compose exec -T n8n-postgres pg_dump -U n8n n8n \
+  | gzip > n8n-db-$(date +%F).sql.gz
+docker compose exec -T directus-postgres pg_dump -U directus directus \
+  | gzip > directus-db-$(date +%F).sql.gz
 
-# n8n data volume (confirm the name with `docker volume ls`;
+# uploads (confirm the volume name with `docker volume ls`;
 # the prefix is the project directory name)
-docker run --rm -v nico-robin_n8n_data:/data:ro -v "$PWD":/backup \
-  alpine tar czf /backup/n8n-data-$(date +%F).tar.gz -C /data .
+docker run --rm -v nico-robin_directus_uploads:/data:ro -v "$PWD":/backup \
+  alpine tar czf /backup/directus-uploads-$(date +%F).tar.gz -C /data .
 ```
 
 Restore:
 
 ```bash
-docker compose up -d postgres
-gunzip -c n8n-db-2026-01-01.sql.gz | docker compose exec -T postgres psql -U n8n -d n8n
+docker compose up -d n8n-postgres directus-postgres
+gunzip -c n8n-db-2026-01-01.sql.gz \
+  | docker compose exec -T n8n-postgres psql -U n8n -d n8n
+gunzip -c directus-db-2026-01-01.sql.gz \
+  | docker compose exec -T directus-postgres psql -U directus -d directus
 docker compose up -d
 ```
 
-Copy the dumps and `.env` off the server, and run the dump from cron.
+Copy the dumps and `.env` off the server, and run them from cron.
 
 ## Updates
 
+Take the backups above first, then:
+
 ```bash
-docker compose exec -T postgres pg_dump -U n8n n8n | gzip > pre-upgrade.sql.gz
 docker compose pull
 docker compose up -d
 docker image prune -f
 ```
 
-Images are pinned (`n8n:2.36.9`, `postgres:16-alpine`), so a `pull` cannot move
-you across a major version unexpectedly. Bump the tag in `compose.yml`
-deliberately, and take the dump first — n8n runs irreversible schema migrations
-on startup, so rolling back means restoring the backup.
+Images are pinned (`n8n:2.36.9`, `directus:12.3.1`, `postgres:16-alpine`), so a
+`pull` cannot move you across a major version unexpectedly. Bump the tags in
+`compose.yml` deliberately, and take the dumps first — both apps run
+irreversible schema migrations on startup, so rolling back means restoring the
+backup.
 
 ## Operational notes
 
-- **`N8N_PROXY_HOPS=1`** tells n8n to trust `X-Forwarded-*` from exactly one
-  proxy. Raise it if you later add Cloudflare or a load balancer in front of
-  nginx; set it to 0 if nothing proxies n8n.
-- **Execution history is pruned** at 14 days / 10,000 records
-  (`EXECUTIONS_DATA_*`). Without this the database grows until the disk fills.
+- **`N8N_PROXY_HOPS=1`** and **`IP_TRUST_PROXY=1`** tell each app to trust
+  `X-Forwarded-*` from exactly one proxy. Raise them if you later add Cloudflare
+  or a load balancer in front of nginx.
+- **Execution history is pruned** at 14 days (`EXECUTIONS_DATA_*`). Without this
+  the database grows until the disk fills.
 - **Container logs are capped** at 10 MB × 3 files per service.
-- **Health checks gate startup order**: n8n waits for Postgres to accept
-  connections, so a reboot brings the stack up in the right order.
-- **Postgres, not SQLite**, which risks corruption on unclean shutdown. To go
-  back, drop the `postgres` service and the `DB_*` variables; n8n falls back to
-  SQLite inside the `n8n_data` volume.
+- **Health checks gate startup order**: each app waits for its Postgres to
+  accept connections, so a reboot brings the stack up in the right order.
+- **n8n reaches Directus at `http://directus:8055`** on the compose network,
+  which never leaves the host.
+- **Postgres, not SQLite**, which risks corruption on unclean shutdown.
 
 ## Status
 
-Early work in progress — the stack is defined, but no assistant workflows exist
-yet.
+Early work in progress — the stack is defined, but no assistant workflows or
+Directus collections exist yet.

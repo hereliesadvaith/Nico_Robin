@@ -1,8 +1,8 @@
-# n8n + Postgres, for a server behind your own reverse proxy.
+# n8n + Directus, each with its own Postgres.
 #
-# n8n binds to 127.0.0.1 by default, so it is reachable only from the host.
-# Terminate TLS in the proxy (nginx, Traefik, Cloudflare Tunnel) and forward
-# to 127.0.0.1:5678 — see README.md.
+# Both apps bind to 127.0.0.1, so they are reachable only from the host.
+# Terminate TLS in a reverse proxy and forward to 127.0.0.1:5678 (n8n) and
+# 127.0.0.1:8055 (Directus) — see README.md.
 #
 # All settings come from .env — copy .env.example to .env first.
 
@@ -18,89 +18,99 @@ services:
     container_name: n8n
     restart: unless-stopped
     ports:
-      # Host-local only. Set N8N_BIND=0.0.0.0 to expose n8n directly
-      # (see "Without a reverse proxy" in README.md).
-      - "${N8N_BIND:-127.0.0.1}:5678:5678"
+      - "127.0.0.1:5678:5678"
     environment:
-      # --- addressing ---------------------------------------------------
-      # Public hostname and URL, used to build webhook and OAuth callbacks.
       - N8N_HOST=${N8N_DOMAIN:?set N8N_DOMAIN in .env}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
       - WEBHOOK_URL=${N8N_PUBLIC_URL:?set N8N_PUBLIC_URL in .env}/
       - N8N_EDITOR_BASE_URL=${N8N_PUBLIC_URL}/
-      # Trust X-Forwarded-* from exactly one proxy. Set to 0 if nothing
-      # sits in front of n8n.
-      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
-      # Requires HTTPS for the session cookie. Only set false if you are
-      # deliberately serving plain HTTP.
-      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-true}
-
-      # --- secrets ------------------------------------------------------
+      - N8N_PROXY_HOPS=1
       # Decrypts stored credentials. Must never change once workflows exist.
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
-
-      # --- database -----------------------------------------------------
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_HOST=n8n-postgres
       - DB_POSTGRESDB_DATABASE=n8n
       - DB_POSTGRESDB_USER=n8n
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-
-      # --- housekeeping -------------------------------------------------
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASSWORD:?set N8N_DB_PASSWORD in .env}
       # Without pruning, execution history grows until the disk fills.
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=336          # hours (14 days)
-      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=10000
-      - N8N_LOG_LEVEL=info
-      - N8N_DIAGNOSTICS_ENABLED=false
-      - N8N_HIRING_BANNER_ENABLED=false
-      # Let in-flight executions finish before shutdown on deploy.
-      - N8N_GRACEFUL_SHUTDOWN_TIMEOUT=30
-
-      # --- locale -------------------------------------------------------
       - GENERIC_TIMEZONE=${TZ:-Asia/Kolkata}
       - TZ=${TZ:-Asia/Kolkata}
     volumes:
-      # Binary execution data and instance state.
       - n8n_data:/home/node/.n8n
-      # Host files reachable from workflows.
-      - ./files:/files
     depends_on:
-      postgres:
+      n8n-postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    security_opt:
-      - no-new-privileges:true
     logging: *default-logging
 
-  postgres:
+  n8n-postgres:
     image: postgres:16-alpine
     container_name: n8n-postgres
     restart: unless-stopped
-    # No ports published: reachable only by n8n on the compose network.
     environment:
       - POSTGRES_DB=n8n
       - POSTGRES_USER=n8n
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - POSTGRES_PASSWORD=${N8N_DB_PASSWORD:?set N8N_DB_PASSWORD in .env}
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - n8n_pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
-    security_opt:
-      - no-new-privileges:true
+    logging: *default-logging
+
+  directus:
+    image: directus/directus:12.3.1
+    container_name: directus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8055:8055"
+    environment:
+      - PUBLIC_URL=${DIRECTUS_PUBLIC_URL:?set DIRECTUS_PUBLIC_URL in .env}
+      - IP_TRUST_PROXY=1
+      # KEY identifies this instance; SECRET signs tokens. Changing SECRET
+      # logs everyone out.
+      - KEY=${DIRECTUS_KEY:?set DIRECTUS_KEY in .env}
+      - SECRET=${DIRECTUS_SECRET:?set DIRECTUS_SECRET in .env}
+      - DB_CLIENT=pg
+      - DB_HOST=directus-postgres
+      - DB_DATABASE=directus
+      - DB_USER=directus
+      - DB_PASSWORD=${DIRECTUS_DB_PASSWORD:?set DIRECTUS_DB_PASSWORD in .env}
+      # Creates the first admin, then ignored.
+      - ADMIN_EMAIL=${DIRECTUS_ADMIN_EMAIL:?set DIRECTUS_ADMIN_EMAIL in .env}
+      - ADMIN_PASSWORD=${DIRECTUS_ADMIN_PASSWORD:?set DIRECTUS_ADMIN_PASSWORD in .env}
+      - TELEMETRY=false
+      - TZ=${TZ:-Asia/Kolkata}
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    depends_on:
+      directus-postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  directus-postgres:
+    image: postgres:16-alpine
+    container_name: directus-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=directus
+      - POSTGRES_USER=directus
+      - POSTGRES_PASSWORD=${DIRECTUS_DB_PASSWORD:?set DIRECTUS_DB_PASSWORD in .env}
+    volumes:
+      - directus_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U directus -d directus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     logging: *default-logging
 
 volumes:
   n8n_data:
-  pg_data:
+  n8n_pg_data:
+  directus_uploads:
+  directus_extensions:
+  directus_pg_data:
