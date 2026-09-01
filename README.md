@@ -7,8 +7,6 @@ The assistant connects to n8n workflows, so anything that can be wired up as a
 workflow — reminders, searches, messages, home automation, and so on — becomes
 something it can do.
 
-Deployment target: **https://advaith.duckdns.org**
-
 ## What's here
 
 | File | Purpose |
@@ -28,16 +26,16 @@ TLS is expected to terminate in a reverse proxy you run on the server.
 
 - A Linux server (Ubuntu 22.04/24.04) with **2 GB RAM minimum**. Postgres plus
   an AI Agent workflow will OOM-kill Node on 1 GB.
-- `advaith.duckdns.org` pointing at the server's public IP. Confirm before
+- `your-domain.com` pointing at the server's public IP. Confirm before
   requesting a certificate:
 
   ```bash
-  dig +short advaith.duckdns.org
+  dig +short your-domain.com
   curl -s https://api.ipify.org; echo
   ```
 
-  DuckDNS records are updated by pinging their API — if the server has a dynamic
-  IP, install their updater cron so the record follows it.
+  If the server has a dynamic IP, install your DNS provider's updater (DuckDNS,
+  No-IP and similar ship a cron script) so the record follows it.
 - Ports **80** and **443** open. Port 80 is needed for Let's Encrypt's HTTP-01
   challenge.
 
@@ -75,8 +73,9 @@ openssl rand -hex 24   # -> POSTGRES_PASSWORD
 chmod 600 .env
 ```
 
-The domain values are already set for `advaith.duckdns.org`. Compose refuses to
-start if either secret is missing, rather than booting with a broken config.
+Set `N8N_DOMAIN` and `N8N_PUBLIC_URL` to your own domain — they appear in
+`.env.example` as `your-domain.com`. Compose refuses to start if either secret
+is missing, rather than booting with a broken config.
 
 > **Back up `.env` off the server.** `N8N_ENCRYPTION_KEY` decrypts every stored
 > credential. A database backup restored without the matching key gives you
@@ -106,7 +105,7 @@ Create `/etc/nginx/sites-available/n8n`:
 ```nginx
 server {
     listen 80;
-    server_name advaith.duckdns.org;
+    server_name your-domain.com;
 
     location / {
         proxy_pass http://127.0.0.1:5678;
@@ -136,7 +135,7 @@ Enable it and add TLS:
 ```bash
 sudo ln -s /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d advaith.duckdns.org
+sudo certbot --nginx -d your-domain.com
 ```
 
 Certbot edits the server block to listen on 443 and installs a renewal timer.
@@ -144,15 +143,15 @@ Certbot edits the server block to listen on 443 and installs a renewal timer.
 ### 7. Verify
 
 ```bash
-curl -I https://advaith.duckdns.org        # 200, no TLS warning
-curl -I http://advaith.duckdns.org         # 301 to https
+curl -I https://your-domain.com        # 200, no TLS warning
+curl -I http://your-domain.com         # 301 to https
 docker compose ps                          # both (healthy)
 ss -ltn | grep 5678                        # should show 127.0.0.1:5678 only
 ```
 
-Then open <https://advaith.duckdns.org> and create the owner account. Do this
+Then open <https://your-domain.com> and create the owner account. Do this
 immediately: until you do, the setup page is open to anyone who finds the
-domain — and DuckDNS subdomains are guessable.
+domain, and a hostname is not a secret.
 
 ### Without a reverse proxy
 
@@ -163,7 +162,7 @@ reasonable for a short test. In `.env`:
 ```ini
 N8N_BIND=0.0.0.0
 N8N_PROTOCOL=http
-N8N_PUBLIC_URL=http://advaith.duckdns.org:5678
+N8N_PUBLIC_URL=http://your-domain.com:5678
 N8N_PROXY_HOPS=0
 N8N_SECURE_COOKIE=false
 ```
