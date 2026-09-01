@@ -85,6 +85,7 @@ services:
       - TELEMETRY=false
       - TZ=${TZ:-Asia/Kolkata}
       - MCP_OAUTH_ENABLED=true
+      - MCP_OAUTH_DCR_ENABLED=true
     volumes:
       - directus_uploads:/directus/uploads
       - directus_extensions:/directus/extensions
