@@ -84,6 +84,7 @@ services:
       - ADMIN_PASSWORD=${DIRECTUS_ADMIN_PASSWORD:?set DIRECTUS_ADMIN_PASSWORD in .env}
       - TELEMETRY=false
       - TZ=${TZ:-Asia/Kolkata}
+      - MCP_OAUTH_ENABLED=true
     volumes:
       - directus_uploads:/directus/uploads
       - directus_extensions:/directus/extensions
