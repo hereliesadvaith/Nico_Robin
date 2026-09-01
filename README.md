@@ -1,11 +1,14 @@
 # Nico Robin
 
-An AI personal assistant built on [n8n](https://n8n.io/), with the personality of
-Nico Robin from *One Piece*.
+An example of setting up an AI assistant that has data and workflows behind it.
+Nothing here is assistant-specific code: the stack runs n8n and Directus, both
+of which expose an MCP server, and a client connected to the two of them gets
+whatever data and whatever workflows you have put in them.
 
-The assistant connects to n8n workflows, so anything that can be wired up as a
-workflow — reminders, searches, messages, home automation, and so on — becomes
-something it can do.
+Directus is the data side — collections, files, anything you model in it — and
+n8n is the action side. Add a collection and the assistant can read it; build a
+workflow and the assistant can run it. What the assistant can do is exactly
+what those two hold, which is the point of the example.
 
 ## What's here
 
@@ -14,9 +17,9 @@ something it can do.
 | `compose.yml` | n8n and Directus, each with its own Postgres. |
 | `.env.example` | Template for the settings `compose.yml` requires. |
 
-Directus is the backend: it holds the assistant's own data — memory, notes,
-whatever the workflows need to persist — and exposes it over REST and GraphQL
-for n8n to call at `http://directus:8055`.
+Both apps also serve their own API to the other over the compose network, so a
+workflow can read and write Directus content at `http://directus:8055` without
+going out through the proxy.
 
 The two apps get a Postgres each rather than sharing one, so neither can reach
 the other's data and either can be moved or rebuilt on its own.
@@ -274,5 +277,7 @@ backup.
 
 ## Status
 
-Early work in progress — the stack is defined, but no assistant workflows or
-Directus collections exist yet.
+This is the primary setup — the stack, nothing on top of it. From here you
+create your own data in Directus (an `expenses` collection, notes, whatever you
+want to track) and your own workflows in n8n, and connect a client to both MCP
+servers. That is what turns it into your assistant.
