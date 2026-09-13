@@ -45,13 +45,13 @@ After writing, reply with one line: title, year, genres, watched date, and
 ## Series
 
 Episodes are not tracked one by one; each show has a running
-`episodes_watched` count and a `status`.
+`episodes` count and a `status`.
 
 - "I watched an episode of X" (or "two episodes", "the season finale"): find
   the row in `series` by `imdb_id` if I gave an IMDb link or id, else by
   `title` (case-insensitive contains; titles are IMDb's, so "The Office"
   not "The Office (US)"; ask if several match). Add the number
-  of episodes to `episodes_watched`. If the row's `status` is `watchlist` or
+  of episodes to `episodes`. If the row's `status` is `watchlist` or
   `paused`, set it to `watching`.
 - "I am caught up on X": set `status` to `up_to_date`.
 - "I finished X": set `status` to `finished`.
@@ -61,11 +61,11 @@ Episodes are not tracked one by one; each show has a running
   IMDb page and take the id from the URL, the year the first episode aired
   and the genres. If more than one show matches, show the candidates and
   ask. Check that no row already has that `imdb_id`. Then insert with
-  `title`, `year`, `imdb_id`, `status` = `watching`, `episodes_watched` = the
+  `title`, `year`, `imdb_id`, `status` = `watching`, `episodes` = the
   number I gave or 1, and `genres`. Do not insert a series without an
   `imdb_id`, a year and at least one genre.
 - "Add X to my series watchlist": same lookup, insert with `status` =
-  `watchlist` and `episodes_watched` = 0.
+  `watchlist` and `episodes` = 0.
 - Never delete a series row unless I ask explicitly. Prefer `stopped`.
 
 After writing, reply with one line: title, year, status, episodes watched.

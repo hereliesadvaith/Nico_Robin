@@ -39,7 +39,7 @@ count of episodes watched.
 | `year`             | integer   | year the first episode aired                                                                             |
 | `imdb_id`          | string    | IMDb title id, e.g. `tt0944947`. Unique in practice; the canonical key for a series                      |
 | `status`           | string    | dropdown: `watching`, `up_to_date`, `paused`, `finished`, `stopped`, `watchlist`; defaults to `watching` |
-| `episodes_watched` | integer   | defaults to 0                                                                                            |
+| `episodes`         | integer   | episodes watched so far, defaults to 0                                                                   |
 | `genres`           | m2m       | many-to-many -> `genres` through `series_genres`                                                         |
 | `date_created`     | timestamp | system, hidden                                                                                           |
 | `date_updated`     | timestamp | system, hidden                                                                                           |
@@ -102,7 +102,7 @@ Series came from `tvtime-series-*.csv`. The export had no IMDb ids for
 series, so each title was matched against the IMDb dataset's TV rows, taking
 the candidate with the most votes; two were fixed by hand (WHAT / IF is the
 2019 Netflix drama, PLUR1BUS is Pluribus 2025). `year` is IMDb's start year.
-`episodes_watched` was counted from `tvtime-series-episodes-*.csv`, which was
+The episode count was taken from `tvtime-series-episodes-*.csv`, which was
 otherwise discarded. TV Time statuses were mapped: continuing -> `watching`,
 up_to_date -> `up_to_date`, watch_later -> `paused`, not_started_yet ->
 `watchlist`.
@@ -124,6 +124,15 @@ TV Time had one year late. Notable renames: "Harry Potter and the
 Philosopher's Stone" -> "Sorcerer's Stone", "Norsemen" -> "Vikingane", "The
 Odd Family: Zombie On Sale" -> "Zombie for Sale". The one-off scripts were
 not kept.
+
+On 2026-09-13 the series count field was replaced by `episodes` and the TV
+Time counts were discarded. For the 75 `finished` and 25 `up_to_date` series
+it was refilled from IMDb's `title.episode.tsv.gz` joined with
+`title.basics.tsv.gz`: episodes of the show's `imdb_id`, excluding specials
+(no season number), episodes dated after 2026 and undated episodes, which
+are unaired. Result: 4345 episodes across finished shows, 662 across
+up_to_date shows. `watching` and `paused` rows are still 0 and need counts
+entered by hand.
 
 New movies and series are added by the assistant, which looks up the IMDb
 id, year and genres on the web first.
