@@ -9,20 +9,22 @@ junction table for each many-to-many.
 One row per movie. Both the watched log and the watchlist live here,
 separated by `status`.
 
-| Field           | Type      | Notes                                                        |
-| --------------- | --------- | ------------------------------------------------------------ |
-| `id`            | integer   | primary key, auto-increment                                  |
-| `title`         | string    | required, max 255 chars                                      |
-| `year`          | integer   | release year. `title` + `year` identifies a movie            |
-| `status`        | string    | dropdown: `watched`, `watchlist`; defaults to `watched`      |
-| `watched_at`    | date      | date only, last time watched. Empty for `watchlist` rows     |
-| `rewatch_count` | integer   | defaults to 0, times watched beyond the first                |
-| `genres`        | m2m       | many-to-many -> `genres` through `movies_genres`             |
-| `date_created`  | timestamp | system, hidden                                               |
-| `date_updated`  | timestamp | system, hidden                                               |
+| Field           | Type      | Notes                                                                              |
+| --------------- | --------- | ---------------------------------------------------------------------------------- |
+| `id`            | integer   | primary key, auto-increment                                                        |
+| `title`         | string    | required, max 255 chars, IMDb primary title                                        |
+| `year`          | integer   | release year, as on IMDb                                                           |
+| `imdb_id`       | string    | IMDb title id, e.g. `tt0107290`. Unique in practice; the canonical key for a movie |
+| `status`        | string    | dropdown: `watched`, `watchlist`; defaults to `watched`                            |
+| `watched_at`    | date      | date only, last time watched. Empty for `watchlist` rows                           |
+| `rewatch_count` | integer   | defaults to 0, times watched beyond the first                                      |
+| `genres`        | m2m       | many-to-many -> `genres` through `movies_genres`                                   |
+| `date_created`  | timestamp | system, hidden                                                                     |
+| `date_updated`  | timestamp | system, hidden                                                                     |
 
 Display template: `{{title}} ({{year}})`. Default sort when listing:
-`watched_at` descending. Expand `genres.genres_id.name` to show genre names.
+`watched_at` descending. `https://www.imdb.com/title/<imdb_id>/` is the IMDb
+page. Expand `genres.genres_id.name` to show genre names.
 Filter by genre with `{"genres": {"genres_id": {"name": {"_eq": "Horror"}}}}`.
 
 ## `series`
@@ -30,16 +32,17 @@ Filter by genre with `{"genres": {"genres_id": {"name": {"_eq": "Horror"}}}}`.
 One row per TV series. Episodes are not tracked individually; only a running
 count of episodes watched.
 
-| Field              | Type      | Notes                                                                                        |
-| ------------------ | --------- | -------------------------------------------------------------------------------------------- |
-| `id`               | integer   | primary key, auto-increment                                                                  |
-| `title`            | string    | required, max 255 chars, unique in practice                                                  |
-| `year`             | integer   | year the first episode aired                                                                 |
+| Field              | Type      | Notes                                                                                                    |
+| ------------------ | --------- | -------------------------------------------------------------------------------------------------------- |
+| `id`               | integer   | primary key, auto-increment                                                                              |
+| `title`            | string    | required, max 255 chars, unique in practice                                                              |
+| `year`             | integer   | year the first episode aired                                                                             |
+| `imdb_id`          | string    | IMDb title id, e.g. `tt0944947`. Unique in practice; the canonical key for a series                      |
 | `status`           | string    | dropdown: `watching`, `up_to_date`, `paused`, `finished`, `stopped`, `watchlist`; defaults to `watching` |
-| `episodes_watched` | integer   | defaults to 0                                                                                |
-| `genres`           | m2m       | many-to-many -> `genres` through `series_genres`                                             |
-| `date_created`     | timestamp | system, hidden                                                                               |
-| `date_updated`     | timestamp | system, hidden                                                                               |
+| `episodes_watched` | integer   | defaults to 0                                                                                            |
+| `genres`           | m2m       | many-to-many -> `genres` through `series_genres`                                                         |
+| `date_created`     | timestamp | system, hidden                                                                                           |
+| `date_updated`     | timestamp | system, hidden                                                                                           |
 
 Status meanings: `watching` = mid-way with episodes left; `up_to_date` =
 caught up on everything aired so far; `paused` = started but set aside;
@@ -107,5 +110,20 @@ up_to_date -> `up_to_date`, watch_later -> `paused`, not_started_yet ->
 Result: 141 series (97 up_to_date, 20 watching, 3 paused, 21 watchlist), all
 with a year and genres, 390 genre links.
 
-New movies and series are added by the assistant, which looks up year and
-genres on the web first.
+`imdb_id` was added on 2026-09-13 and backfilled from the IMDb dataset
+(`title.basics.tsv.gz` + `title.ratings.tsv.gz`), matching each row on title
+and year and breaking ties by overlap with the row's genres, then by vote
+count. Series reused the match from the original import. Twenty movies whose
+TV Time title or year differed from IMDb were resolved by hand. Every row in
+both collections has an `imdb_id`.
+
+On the same day `title` and `year` of every row were rewritten to IMDb's
+primary title and start year: 102 movies and 20 series changed, mostly
+capitalisation, punctuation, "(US)"/"(2021)" suffixes, and release years that
+TV Time had one year late. Notable renames: "Harry Potter and the
+Philosopher's Stone" -> "Sorcerer's Stone", "Norsemen" -> "Vikingane", "The
+Odd Family: Zombie On Sale" -> "Zombie for Sale". The one-off scripts were
+not kept.
+
+New movies and series are added by the assistant, which looks up the IMDb
+id, year and genres on the web first.
