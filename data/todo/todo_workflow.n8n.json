@@ -1,0 +1,671 @@
+{
+  "id": "sLAguPhpBoB887ZN",
+  "name": "Todo",
+  "description": null,
+  "active": true,
+  "activeVersionId": "bb269307-27bd-4afb-bbb0-2dc84e28bcd1",
+  "createdAt": "2026-09-04T02:36:21.186Z",
+  "updatedAt": "2026-09-07T21:38:33.354Z",
+  "isArchived": false,
+  "versionId": "bb269307-27bd-4afb-bbb0-2dc84e28bcd1",
+  "versionCounter": 9,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Every day at 6 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Run now",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "todo-digest",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "webhookId": "d09e1478-e0ce-45ad-a3b1-eca33d6af12e"
+    },
+    {
+      "id": "n3",
+      "name": "Fetch due todos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://directus:8055/items/todos",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "directusApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,title,priority,due_date,notes"
+            },
+            {
+              "name": "filter",
+              "value": "={\"_and\":[{\"status\":{\"_eq\":\"open\"}},{\"due_date\":{\"_lte\":\"{{ $today.toFormat('yyyy-LL-dd') }}\"}}]}"
+            },
+            {
+              "name": "sort",
+              "value": "due_date"
+            },
+            {
+              "name": "limit",
+              "value": "-1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "directusApi": {
+          "id": "93fWPTzkBwCPgaWq",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "id": "n4",
+      "name": "Build digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const rows = $input.first().json.data || [];\nconst today = $today.toFormat('yyyy-LL-dd');\nconst rank = { high: 0, normal: 1, low: 2 };\nrows.sort((a, b) => ((rank[a.priority] ?? 1) - (rank[b.priority] ?? 1)) || String(a.due_date).localeCompare(String(b.due_date)));\nconst items = rows.map(r => ({ id: r.id, title: r.title, priority: r.priority, due_date: r.due_date, overdue: r.due_date < today }));\nconst overdue = items.filter(i => i.overdue).length;\nconst lines = [];\nlines.push(`Todos for ${$today.toFormat('ccc dd LLL yyyy')}: ${items.length} open` + (overdue ? ` (${overdue} overdue)` : ''));\nif (!items.length) lines.push('Nothing due today.');\nfor (const i of items) {\n  let line = `- [${String(i.priority).toUpperCase()}] ${i.title}`;\n  if (i.overdue) line += ` (overdue, was due ${i.due_date})`;\n  lines.push(line);\n}\nreturn [{ json: { date: today, todo_count: items.length, body: lines.join('\\n'), items } }];"
+      }
+    },
+    {
+      "id": "n5",
+      "name": "Find today's digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://directus:8055/items/daily_digests",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "directusApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id"
+            },
+            {
+              "name": "filter",
+              "value": "={\"date\":{\"_eq\":\"{{ $json.date }}\"}}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "directusApi": {
+          "id": "93fWPTzkBwCPgaWq",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "id": "n6",
+      "name": "Digest exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.data.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n7",
+      "name": "Update digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://directus:8055/items/daily_digests/{{ $json.data[0].id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "directusApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build digest').first().json) }}",
+        "options": {}
+      },
+      "credentials": {
+        "directusApi": {
+          "id": "93fWPTzkBwCPgaWq",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "id": "n8",
+      "name": "Create digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://directus:8055/items/daily_digests",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "directusApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build digest').first().json) }}",
+        "options": {}
+      },
+      "credentials": {
+        "directusApi": {
+          "id": "93fWPTzkBwCPgaWq",
+          "name": "Directus account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every day at 6 AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch due todos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "Fetch due todos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch due todos": {
+      "main": [
+        [
+          {
+            "node": "Build digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build digest": {
+      "main": [
+        [
+          {
+            "node": "Find today's digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find today's digest": {
+      "main": [
+        [
+          {
+            "node": "Digest exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest exists?": {
+      "main": [
+        [
+          {
+            "node": "Update digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timezone": "Asia/Kolkata"
+  },
+  "staticData": {
+    "node:Every day at 6 AM": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "sLAguPhpBoB887ZN",
+      "projectId": "xbRSiz3jYXyz2LDc",
+      "project": {
+        "id": "xbRSiz3jYXyz2LDc",
+        "name": "Advaith B G <hereliesadvaith@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "749b24a1-50e9-4abf-b1fa-0d7e6ce9d025",
+        "createdAt": "2026-09-01T19:24:26.659Z",
+        "updatedAt": "2026-09-01T19:25:50.142Z"
+      },
+      "createdAt": "2026-09-04T02:36:21.186Z",
+      "updatedAt": "2026-09-04T02:36:21.186Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "bb269307-27bd-4afb-bbb0-2dc84e28bcd1",
+    "workflowId": "sLAguPhpBoB887ZN",
+    "nodes": [
+      {
+        "id": "n1",
+        "name": "Every day at 6 AM",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 6 * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "n2",
+        "name": "Run now",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          220
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "todo-digest",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "webhookId": "d09e1478-e0ce-45ad-a3b1-eca33d6af12e"
+      },
+      {
+        "id": "n3",
+        "name": "Fetch due todos",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          260,
+          100
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://directus:8055/items/todos",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "directusApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "fields",
+                "value": "id,title,priority,due_date,notes"
+              },
+              {
+                "name": "filter",
+                "value": "={\"_and\":[{\"status\":{\"_eq\":\"open\"}},{\"due_date\":{\"_lte\":\"{{ $today.toFormat('yyyy-LL-dd') }}\"}}]}"
+              },
+              {
+                "name": "sort",
+                "value": "due_date"
+              },
+              {
+                "name": "limit",
+                "value": "-1"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "credentials": {
+          "directusApi": {
+            "id": "93fWPTzkBwCPgaWq",
+            "name": "Directus account"
+          }
+        }
+      },
+      {
+        "id": "n4",
+        "name": "Build digest",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          520,
+          100
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const rows = $input.first().json.data || [];\nconst today = $today.toFormat('yyyy-LL-dd');\nconst rank = { high: 0, normal: 1, low: 2 };\nrows.sort((a, b) => ((rank[a.priority] ?? 1) - (rank[b.priority] ?? 1)) || String(a.due_date).localeCompare(String(b.due_date)));\nconst items = rows.map(r => ({ id: r.id, title: r.title, priority: r.priority, due_date: r.due_date, overdue: r.due_date < today }));\nconst overdue = items.filter(i => i.overdue).length;\nconst lines = [];\nlines.push(`Todos for ${$today.toFormat('ccc dd LLL yyyy')}: ${items.length} open` + (overdue ? ` (${overdue} overdue)` : ''));\nif (!items.length) lines.push('Nothing due today.');\nfor (const i of items) {\n  let line = `- [${String(i.priority).toUpperCase()}] ${i.title}`;\n  if (i.overdue) line += ` (overdue, was due ${i.due_date})`;\n  lines.push(line);\n}\nreturn [{ json: { date: today, todo_count: items.length, body: lines.join('\\n'), items } }];"
+        }
+      },
+      {
+        "id": "n5",
+        "name": "Find today's digest",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          780,
+          100
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://directus:8055/items/daily_digests",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "directusApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "fields",
+                "value": "id"
+              },
+              {
+                "name": "filter",
+                "value": "={\"date\":{\"_eq\":\"{{ $json.date }}\"}}"
+              },
+              {
+                "name": "limit",
+                "value": "1"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "credentials": {
+          "directusApi": {
+            "id": "93fWPTzkBwCPgaWq",
+            "name": "Directus account"
+          }
+        }
+      },
+      {
+        "id": "n6",
+        "name": "Digest exists?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1040,
+          100
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.data.length }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "n7",
+        "name": "Update digest",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1300,
+          0
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "=http://directus:8055/items/daily_digests/{{ $json.data[0].id }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "directusApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Build digest').first().json) }}",
+          "options": {}
+        },
+        "credentials": {
+          "directusApi": {
+            "id": "93fWPTzkBwCPgaWq",
+            "name": "Directus account"
+          }
+        }
+      },
+      {
+        "id": "n8",
+        "name": "Create digest",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1300,
+          220
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://directus:8055/items/daily_digests",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "directusApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Build digest').first().json) }}",
+          "options": {}
+        },
+        "credentials": {
+          "directusApi": {
+            "id": "93fWPTzkBwCPgaWq",
+            "name": "Directus account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Every day at 6 AM": {
+        "main": [
+          [
+            {
+              "node": "Fetch due todos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run now": {
+        "main": [
+          [
+            {
+              "node": "Fetch due todos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch due todos": {
+        "main": [
+          [
+            {
+              "node": "Build digest",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build digest": {
+        "main": [
+          [
+            {
+              "node": "Find today's digest",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Find today's digest": {
+        "main": [
+          [
+            {
+              "node": "Digest exists?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Digest exists?": {
+        "main": [
+          [
+            {
+              "node": "Update digest",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Create digest",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Advaith B G",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-09-07T21:38:33.376Z",
+    "updatedAt": "2026-09-07T21:38:33.376Z",
+    "workflowPublishHistory": [
+      {
+        "id": 1,
+        "workflowId": "sLAguPhpBoB887ZN",
+        "versionId": "bb269307-27bd-4afb-bbb0-2dc84e28bcd1",
+        "event": "activated",
+        "userId": "749b24a1-50e9-4abf-b1fa-0d7e6ce9d025",
+        "createdAt": "2026-09-07T21:38:34.789Z"
+      }
+    ]
+  }
+}
